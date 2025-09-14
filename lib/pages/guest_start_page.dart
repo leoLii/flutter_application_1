@@ -4,6 +4,7 @@ import '../shared/layout_utils.dart';
 import '../shared/svg_art.dart';
 import 'auth_page.dart';
 import 'session_page.dart';
+import 'conversation_list_page.dart';
 
 class GuestStartPage extends StatelessWidget {
   const GuestStartPage({super.key});
@@ -53,6 +54,33 @@ class GuestStartPage extends StatelessWidget {
                           MaterialPageRoute(builder: (_) => const SessionPage()),
                         ),
                       )),
+                      // 跳轉到對話列表頁
+                      Positioned(
+                        left: 224,
+                        top: 580,
+                        child: SizedBox(
+                          width: 105,
+                          height: 45,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFA7C7E7),
+                              foregroundColor: const Color(0xFF143343),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const ConversationListPage()),
+                              );
+                            },
+                            child: const Text(
+                              '對話列表',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                      ),
                       const Positioned(
                         left: tagX, top: tagY - 14,
                         child: Text('你的心情樹洞',

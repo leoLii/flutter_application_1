@@ -128,7 +128,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
       pick ??= ['zh-CN','zh_CN','zh-Hans','cmn-Hans-CN','zh-TW','zh_TW','zh-Hant','yue-Hant-HK']
           .firstWhere((id) => true, orElse: () => '');
 
-      if (pick != null && pick.isNotEmpty) return pick;
+      if (pick.isNotEmpty) return pick;
     } catch (_) {}
     // 4) 兜底返回預設簡體
     return 'zh-CN';
