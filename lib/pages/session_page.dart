@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
-import '../shared/layout_utils.dart';
+// import '../shared/layout_utils.dart';
 import '../shared/svg_art.dart';
 
 class SessionPage extends StatefulWidget {
@@ -15,11 +15,6 @@ class SessionPage extends StatefulWidget {
 }
 
 class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin {
-  static const double vw = 553.082989;
-  static const double vh = 932.25;
-
-  static const Rect backHit = Rect.fromLTWH(62 + 24, 24, 33, 28);
-  static const Rect micHit  = Rect.fromLTWH(62 + 171, 822, 90, 90);
 
   // ===== 背景顏色動畫（隨機混合流動，藍→橘逐步過渡）與 1 分鐘倒數 =====
   late final AnimationController _ctrl; // 進度（0→1，控制藍→橘比例）
@@ -84,6 +79,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
       });
       if (_secLeft == 0) {
         t.cancel();
+        _ticker = null;
         _ctrl.stop();
         _flow.stop();
         if (_transcript.trim().isNotEmpty) {
@@ -93,6 +89,8 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
           try { await _stt.stop(); } catch (_) {}
           setState(() => _listening = false);
         }
+        // 允許之後再次開始新一輪 1 分鐘窗口
+        _started = false;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('時間到')),
@@ -175,9 +173,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   }
 
   Future<void> _beginListen() async {
-    // debug：確認實際送入的語系
-    // ignore: avoid_print
-    print('STT listen with localeId=$_localeId');
     await _stt.listen(
       onResult: (r) {
         setState(() => _transcript = r.recognizedWords);
@@ -268,235 +263,253 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
     return Scaffold(
       backgroundColor: const Color(0xFF0C1C24),
       body: SafeArea(
-        child: Center(
-          child: AspectRatio(
-            aspectRatio: 430 / 932,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: vw, height: vh,
-                  child: Stack(
-                    children: [
-                      // 最底層：純藍天空底色（不改解析度）
-                      const Positioned.fill(
-                        child: ColoredBox(color: Color(0xFF1E88E5)),
-                      ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final w = constraints.maxWidth;
+            final h = constraints.maxHeight;
 
-                      // 先畫 SVG，避免彩雲被整張 SVG 遮住
-                      Positioned.fill(
-                        child: SvgPicture.string(
-                          sessionSvgWrapped,
-                          fit: BoxFit.fill,
-                        ),
-                      ),
+            // === 相對比例（基於你原設計尺寸換算） ===
+            const backLeftFrac   = 86.0 / 553.082989;  // 86 = 62+24
+            const backTopFrac    = 24.0 / 932.25;
+            const backWFrac      = 33.0 / 553.082989;
+            const backHFrac      = 28.0 / 932.25;
 
-                      // 彩雲背景：多個會流動的橙色雲團（不改解析度、僅橙色）
-                      Positioned.fill(
-                        child: AnimatedBuilder(
-                          animation: Listenable.merge([_ctrl, _flow]),
-                          builder: (_, __) {
-                            final t = _ctrl.value;                   // 0→1：橙色覆蓋比例逐漸增多
-                            final phase = _flow.value * 2 * math.pi; // 流動相位
+            const micWFrac       = 140.0 / 553.082989;
+            const micHFrac       = 140.0 / 932.25;
+            const micLeftFrac    = ((553.082989 - 140.0) / 2) / 553.082989;
+            const micTopFrac     = ((932.25 - 140.0) / 2) / 932.25;
 
-                            const cloudOrange = Color(0xFFFF8A00);
+            const listLeftFrac   = 16.0 / 553.082989;
+            const listRightFrac  = 16.0 / 553.082989;
+            const listTopFrac    = 96.0 / 932.25;
+            const listBottomFrac = 180.0 / 932.25;
 
-                            // 只畫橙色雲團（藍底已在最底層；SVG 在下層）
-                            final blobs = <Widget>[];
-                            for (var i = 0; i < _seeds.length; i++) {
-                              final seed = _seeds[i];
-                              final baseX = 0.5 + 0.45 * math.sin(phase * (0.6 + 0.1 * i) + seed * 8.0);
-                              final baseY = 0.5 + 0.35 * math.cos(phase * (0.5 + 0.07 * i) + seed * 6.0);
+            const subtitleLeftFrac   = 24.0 / 553.082989;
+            const subtitleRightFrac  = 24.0 / 553.082989;
+            const subtitleBottomFrac = 70.0 / 932.25;
 
-                              // 雲團半徑：隨 t 由小→大（覆蓋率增加）
-                              final minR = 0.14; // 相對於畫面短邊
-                              final maxR = 0.34;
-                              final radius = (minR + (maxR - minR) * (0.35 + 0.65 * t));
+            const timerBottomFrac = 10.0 / 932.25;
+            const bubbleMaxWFrac  = 360.0 / 553.082989;
 
-                              // 透明度：t 越大越實（但保留柔邊）
-                              final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
+            return Stack(
+              children: [
+                // 最底層：純藍天空底色
+                const Positioned.fill(
+                  child: ColoredBox(color: Color(0xFF1E88E5)),
+                ),
 
-                              // 轉換到實際尺寸（不改你畫面比例；以 vw/vh 為座標）
-                              final cx = vw * baseX;
-                              final cy = vh * baseY;
-                              final r  = (math.min(vw, vh) * radius);
-
-                              blobs.add(
-                                Positioned(
-                                  left: cx - r,
-                                  top: cy - r,
-                                  width: r * 2,
-                                  height: r * 2,
-                                  child: IgnorePointer(
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        gradient: RadialGradient(
-                                          colors: [
-                                            cloudOrange.withOpacity(alpha),
-                                            cloudOrange.withOpacity(0.0),
-                                          ],
-                                          stops: const [0.0, 1.0],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
-
-                            return Stack(children: blobs);
-                          },
-                        ),
-                      ),
-
-                      // 返回按鈕
-                      box(backHit, Stack(children: [
-                        Positioned.fill(child: SvgPicture.string(backArrowPath)),
-                        Positioned.fill(child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(onTap: () => Navigator.of(context).pop()),
-                        )),
-                      ])),
-
-                      // 對話紀錄（滾動列表）
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        top: 96,
-                        bottom: 180,
-                        child: IgnorePointer(
-                          child: Container(
-                            alignment: Alignment.bottomCenter,
-                            child: ListView.builder(
-                              controller: _scrollCtl,
-                              padding: const EdgeInsets.only(bottom: 12),
-                              itemCount: _messages.length + (_transcript.isNotEmpty ? 1 : 0),
-                              itemBuilder: (context, idx) {
-                                final isLive = idx == _messages.length && _transcript.isNotEmpty;
-                                final text = isLive ? _transcript : _messages[idx];
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 6),
-                                  child: Align(
-                                    alignment: Alignment.centerRight,
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(maxWidth: 360),
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: isLive ? const Color(0xFFFF8A00).withOpacity(0.55) : const Color(0xFFFF8A00),
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                          child: Text(
-                                            text,
-                                            style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 中央大型錄音按鈕
-                      Positioned(
-                        left: (vw - 140) / 2,
-                        top:  (vh - 140) / 2,
-                        width: 140,
-                        height: 140,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: _toggleRecord,
-                            borderRadius: BorderRadius.circular(80),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              curve: Curves.easeOut,
-                              decoration: BoxDecoration(
-                                color: _listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7),
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: (_listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7)).withOpacity(0.5),
-                                    blurRadius: 24,
-                                    spreadRadius: 6,
-                                  ),
-                                ],
-                              ),
-                              child: Center(
-                                child: Icon(
-                                  _listening ? Icons.stop_rounded : Icons.mic_rounded,
-                                  size: 64,
-                                  color: const Color(0xFF143343),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 辨識文字顯示（置中，倒數上方）
-                      Positioned(
-                        left: 24,
-                        right: 24,
-                        bottom: 70,
-                        child: IgnorePointer(
-                          child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 200),
-                            opacity: _transcript.isEmpty ? 0.0 : 1.0,
-                            child: Text(
-                              _transcript,
-                              textAlign: TextAlign.center,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                height: 1.4,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      // 底部倒數計時（覆在最上層）
-                      Positioned(
-                        left: 0, right: 0, bottom: 10,
-                        child: SafeArea(
-                          top: false,
-                          child: Center(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.35),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '剩餘時間  ${_mmss(_secLeft)}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                // 先畫 SVG
+                Positioned.fill(
+                  child: SvgPicture.string(
+                    sessionSvgWrapped,
+                    fit: BoxFit.fill,
                   ),
                 ),
-              ),
-            ),
-          ),
+
+                // 彩雲背景：多個會流動的橙色雲團
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation: Listenable.merge([_ctrl, _flow]),
+                    builder: (_, __) {
+                      final t = _ctrl.value;                   // 0→1：橙色覆蓋比例逐漸增多
+                      final phase = _flow.value * 2 * math.pi; // 流動相位
+
+                      const cloudOrange = Color(0xFFFF8A00);
+                      final blobs = <Widget>[];
+                      for (var i = 0; i < _seeds.length; i++) {
+                        final seed = _seeds[i];
+                        final baseX = 0.5 + 0.45 * math.sin(phase * (0.6 + 0.1 * i) + seed * 8.0);
+                        final baseY = 0.5 + 0.35 * math.cos(phase * (0.5 + 0.07 * i) + seed * 6.0);
+
+                        final minR = 0.14; // 相對於畫面短邊
+                        final maxR = 0.34;
+                        final radius = (minR + (maxR - minR) * (0.35 + 0.65 * t));
+                        final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
+
+                        // 使用實際螢幕 w/h 做定位與半徑
+                        final cx = w * baseX;
+                        final cy = h * baseY;
+                        final r  = math.min(w, h) * radius;
+
+                        blobs.add(
+                          Positioned(
+                            left: cx - r,
+                            top: cy - r,
+                            width: r * 2,
+                            height: r * 2,
+                            child: IgnorePointer(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      cloudOrange.withOpacity(alpha),
+                                      cloudOrange.withOpacity(0.0),
+                                    ],
+                                    stops: const [0.0, 1.0],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      return Stack(children: blobs);
+                    },
+                  ),
+                ),
+
+                // 返回按鈕（相對定位替代 box(backHit, ...)）
+                Positioned(
+                  left: w * backLeftFrac,
+                  top:  h * backTopFrac,
+                  width:  w * backWFrac,
+                  height: h * backHFrac,
+                  child: Stack(children: [
+                    Positioned.fill(child: SvgPicture.string(backArrowPath)),
+                    Positioned.fill(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(onTap: () => Navigator.of(context).pop()),
+                      ),
+                    ),
+                  ]),
+                ),
+
+                // 對話紀錄（滾動列表）
+                Positioned(
+                  left:   w * listLeftFrac,
+                  right:  w * listRightFrac,
+                  top:    h * listTopFrac,
+                  bottom: h * listBottomFrac,
+                  child: IgnorePointer(
+                    child: Container(
+                      alignment: Alignment.bottomCenter,
+                      child: ListView.builder(
+                        controller: _scrollCtl,
+                        padding: const EdgeInsets.only(bottom: 12),
+                        itemCount: _messages.length + (_transcript.isNotEmpty ? 1 : 0),
+                        itemBuilder: (context, idx) {
+                          final isLive = idx == _messages.length && _transcript.isNotEmpty;
+                          final text = isLive ? _transcript : _messages[idx];
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(maxWidth: w * bubbleMaxWFrac),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: isLive ? const Color(0xFFFF8A00).withOpacity(0.55) : const Color(0xFFFF8A00),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    child: Text(
+                                      text,
+                                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 中央大型錄音按鈕（相對尺寸/位置）
+                Positioned(
+                  left: w * micLeftFrac,
+                  top:  h * micTopFrac,
+                  width:  w * micWFrac,
+                  height: h * micHFrac,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _toggleRecord,
+                      borderRadius: BorderRadius.circular(80),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOut,
+                        decoration: BoxDecoration(
+                          color: _listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7)).withOpacity(0.5),
+                              blurRadius: 24,
+                              spreadRadius: 6,
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Icon(
+                            _listening ? Icons.stop_rounded : Icons.mic_rounded,
+                            size: 64,
+                            color: const Color(0xFF143343),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 辨識文字顯示（置中，倒數上方）
+                Positioned(
+                  left:   w * subtitleLeftFrac,
+                  right:  w * subtitleRightFrac,
+                  bottom: h * subtitleBottomFrac,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 200),
+                      opacity: _transcript.isEmpty ? 0.0 : 1.0,
+                      child: Text(
+                        _transcript,
+                        textAlign: TextAlign.center,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 底部倒數計時
+                Positioned(
+                  left: 0, right: 0, bottom: h * timerBottomFrac,
+                  child: SafeArea(
+                    top: false,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.35),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '剩餘時間  ${_mmss(_secLeft)}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
