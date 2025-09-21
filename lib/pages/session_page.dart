@@ -4,9 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
-// import '../shared/layout_utils.dart';
-import '../shared/svg_art.dart';
-
 class SessionPage extends StatefulWidget {
   const SessionPage({super.key});
 
@@ -35,6 +32,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   // 對話紀錄（每段話）
   final List<String> _messages = <String>[];
   final ScrollController _scrollCtl = ScrollController();
+  final ScrollController _overlayCtl = ScrollController();
 
   @override
   void initState() {
@@ -54,7 +52,19 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
       _stt.stop();
     }
     _scrollCtl.dispose();
+    _overlayCtl.dispose();
     super.dispose();
+  }
+  void _scrollOverlayToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_overlayCtl.hasClients) {
+        _overlayCtl.animateTo(
+          _overlayCtl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   void _startCountdown() {
@@ -176,6 +186,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
     await _stt.listen(
       onResult: (r) {
         setState(() => _transcript = r.recognizedWords);
+        _scrollOverlayToEnd();
         if (r.finalResult) {
           _commitCurrentUtterance();
           if (_secLeft > 0) {
@@ -228,6 +239,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
         );
       }
     });
+    _scrollOverlayToEnd();
   }
 
   void _onSttStatus(String s) {
@@ -268,45 +280,30 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
             final w = constraints.maxWidth;
             final h = constraints.maxHeight;
 
-            // === 相對比例（基於你原設計尺寸換算） ===
-            const backLeftFrac   = 86.0 / 553.082989;  // 86 = 62+24
-            const backTopFrac    = 24.0 / 932.25;
-            const backWFrac      = 33.0 / 553.082989;
-            const backHFrac      = 28.0 / 932.25;
+            // 相對尺寸（文字、間距、圓角、圖示等）
+            final s = math.min(w, h);
+            final fsBody     = h * (15.0 / 932.25);
+            final fsSubtitle = h * (16.0 / 932.25);
+            final fsTimer    = h * (14.0 / 932.25);
+            final padX       = s * (12.0 / 553.082989);
+            final padY       = s * (8.0  / 553.082989);
+            final bubbleR    = s * (12.0 / 553.082989);
+            final iconSize   = h * (64.0 / 932.25);
+            final blurR      = s * (24.0 / 553.082989);
+            final spreadR    = s * (6.0  / 553.082989);
 
-            const micWFrac       = 140.0 / 553.082989;
-            const micHFrac       = 140.0 / 932.25;
-            const micLeftFrac    = ((553.082989 - 140.0) / 2) / 553.082989;
-            const micTopFrac     = ((932.25 - 140.0) / 2) / 932.25;
-
-            const listLeftFrac   = 16.0 / 553.082989;
-            const listRightFrac  = 16.0 / 553.082989;
-            const listTopFrac    = 96.0 / 932.25;
-            const listBottomFrac = 180.0 / 932.25;
-
-            const subtitleLeftFrac   = 24.0 / 553.082989;
-            const subtitleRightFrac  = 24.0 / 553.082989;
-            const subtitleBottomFrac = 70.0 / 932.25;
-
-            const timerBottomFrac = 10.0 / 932.25;
+            // 位置/比例（由原設計值換算而來）
             const bubbleMaxWFrac  = 360.0 / 553.082989;
+            const micSizeFrac     = 140.0 / 553.082989; // 以寬為準
 
             return Stack(
               children: [
-                // 最底層：純藍天空底色
+                // 背景：純藍底 + SVG
                 const Positioned.fill(
                   child: ColoredBox(color: Color(0xFF1E88E5)),
                 ),
 
-                // 先畫 SVG
-                Positioned.fill(
-                  child: SvgPicture.string(
-                    sessionSvgWrapped,
-                    fit: BoxFit.fill,
-                  ),
-                ),
-
-                // 彩雲背景：多個會流動的橙色雲團
+                // 彩雲層（仍舊鋪滿）
                 Positioned.fill(
                   child: AnimatedBuilder(
                     animation: Listenable.merge([_ctrl, _flow]),
@@ -326,7 +323,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                         final radius = (minR + (maxR - minR) * (0.35 + 0.65 * t));
                         final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
 
-                        // 使用實際螢幕 w/h 做定位與半徑
                         final cx = w * baseX;
                         final cy = h * baseY;
                         final r  = math.min(w, h) * radius;
@@ -359,152 +355,220 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                   ),
                 ),
 
-                // 返回按鈕（相對定位替代 box(backHit, ...)）
-                Positioned(
-                  left: w * backLeftFrac,
-                  top:  h * backTopFrac,
-                  width:  w * backWFrac,
-                  height: h * backHFrac,
-                  child: Stack(children: [
-                    Positioned.fill(child: SvgPicture.string(backArrowPath)),
-                    Positioned.fill(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(onTap: () => Navigator.of(context).pop()),
-                      ),
-                    ),
-                  ]),
-                ),
-
-                // 對話紀錄（滾動列表）
-                Positioned(
-                  left:   w * listLeftFrac,
-                  right:  w * listRightFrac,
-                  top:    h * listTopFrac,
-                  bottom: h * listBottomFrac,
-                  child: IgnorePointer(
-                    child: Container(
-                      alignment: Alignment.bottomCenter,
-                      child: ListView.builder(
-                        controller: _scrollCtl,
-                        padding: const EdgeInsets.only(bottom: 12),
-                        itemCount: _messages.length + (_transcript.isNotEmpty ? 1 : 0),
-                        itemBuilder: (context, idx) {
-                          final isLive = idx == _messages.length && _transcript.isNotEmpty;
-                          final text = isLive ? _transcript : _messages[idx];
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(maxWidth: w * bubbleMaxWFrac),
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: isLive ? const Color(0xFFFF8A00).withOpacity(0.55) : const Color(0xFFFF8A00),
-                                    borderRadius: BorderRadius.circular(12),
+                // 前景 UI：使用 Column + Align，不再用大量 Positioned
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: w * 0.06),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 頂部：返回
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: w * 0.10,
+                            height: h * 0.05,
+                            child: Stack(
+                              children: [
+                                // 顯示返回圖示
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Icon(
+                                    Icons.arrow_back_ios_new_rounded,
+                                    color: Colors.white,
+                                    size: h * 0.028, // 相對尺寸
                                   ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    child: Text(
-                                      text,
-                                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.35),
+                                ),
+                                // 點擊熱區（覆蓋整個區域）
+                                Positioned.fill(
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => Navigator.of(context).pop(),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Spacer(),
+                        ],
+                      ),
+
+                      SizedBox(height: h * 0.01),
+
+                      // 中部：對話列表（向下擠壓）
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: ListView.builder(
+                            controller: _scrollCtl,
+                            padding: EdgeInsets.only(bottom: h * (12.0 / 932.25)),
+                            itemCount: _messages.length + (_transcript.isNotEmpty ? 1 : 0),
+                            itemBuilder: (context, idx) {
+                              final isLive = idx == _messages.length && _transcript.isNotEmpty;
+                              final text = isLive ? _transcript : _messages[idx];
+                              return Padding(
+                                padding: EdgeInsets.symmetric(vertical: h * 0.006),
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: w * bubbleMaxWFrac),
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: isLive ? const Color(0xFFFF8A00).withOpacity(0.55) : const Color(0xFFFF8A00),
+                                        borderRadius: BorderRadius.circular(bubbleR),
+                                      ),
+                                      child: Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: padX, vertical: padY),
+                                        child: Text(
+                                          text,
+                                          style: TextStyle(color: Colors.white, fontSize: fsBody, height: 1.35),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+
+                      // 中間透明流式對話框（顯示我的對話內容，無限流式）
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 220),
+                        opacity: (_listening || _transcript.isNotEmpty) ? 1.0 : 0.0,
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: w * 0.86,
+                              minWidth: w * 0.6,
+                              maxHeight: h * 0.26,
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.12),  // 近似透明，便於可讀
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(horizontal: padX, vertical: padY),
+                                child: Scrollbar(
+                                  thumbVisibility: false,
+                                  controller: _overlayCtl,
+                                  child: SingleChildScrollView(
+                                    controller: _overlayCtl,
+                                    physics: const BouncingScrollPhysics(),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        // 顯示最近幾條已提交的對話（可視化上下文）
+                                        ..._messages.take(_messages.length).skip((_messages.length - 6).clamp(0, _messages.length)).map((m) => Padding(
+                                              padding: EdgeInsets.only(bottom: h * 0.006),
+                                              child: Text(
+                                                m,
+                                                style: TextStyle(color: Colors.white.withOpacity(0.86), fontSize: fsBody, height: 1.35),
+                                              ),
+                                            )),
+                                        // 實時流式字幕（帶閃爍光標）
+                                        if (_transcript.isNotEmpty || _listening)
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  _transcript.isEmpty ? '…' : _transcript,
+                                                  style: TextStyle(color: Colors.white, fontSize: fsSubtitle, height: 1.35, fontWeight: FontWeight.w600),
+                                                ),
+                                              ),
+                                              // 使用 _flow 的相位做簡易閃爍
+                                              AnimatedBuilder(
+                                                animation: _flow,
+                                                builder: (_, __) {
+                                                  final show = (_flow.value % 1.0) < 0.5;
+                                                  return Opacity(
+                                                    opacity: show ? 1.0 : 0.0,
+                                                    child: Text('▋', style: TextStyle(color: Colors.white, fontSize: fsSubtitle)),
+                                                  );
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                      ],
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          );
-                        },
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
 
-                // 中央大型錄音按鈕（相對尺寸/位置）
-                Positioned(
-                  left: w * micLeftFrac,
-                  top:  h * micTopFrac,
-                  width:  w * micWFrac,
-                  height: h * micHFrac,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _toggleRecord,
-                      borderRadius: BorderRadius.circular(80),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        curve: Curves.easeOut,
-                        decoration: BoxDecoration(
-                          color: _listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: (_listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7)).withOpacity(0.5),
-                              blurRadius: 24,
-                              spreadRadius: 6,
+                      SizedBox(height: h * 0.012),
+
+                      // 中央錄音按鈕
+                      Center(
+                        child: SizedBox(
+                          width: w * micSizeFrac,
+                          height: w * micSizeFrac,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _toggleRecord,
+                              borderRadius: BorderRadius.circular((w * micSizeFrac) / 2),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeOut,
+                                decoration: BoxDecoration(
+                                  color: _listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: (_listening ? const Color(0xFFE65100) : const Color(0xFFA7C7E7)).withOpacity(0.5),
+                                      blurRadius: blurR,
+                                      spreadRadius: spreadR,
+                                    ),
+                                  ],
+                                ),
+                                child: Center(
+                                  child: Icon(
+                                    _listening ? Icons.stop_rounded : Icons.mic_rounded,
+                                    size: iconSize,
+                                    color: const Color(0xFF143343),
+                                  ),
+                                ),
+                              ),
                             ),
-                          ],
-                        ),
-                        child: Center(
-                          child: Icon(
-                            _listening ? Icons.stop_rounded : Icons.mic_rounded,
-                            size: 64,
-                            color: const Color(0xFF143343),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ),
 
-                // 辨識文字顯示（置中，倒數上方）
-                Positioned(
-                  left:   w * subtitleLeftFrac,
-                  right:  w * subtitleRightFrac,
-                  bottom: h * subtitleBottomFrac,
-                  child: IgnorePointer(
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 200),
-                      opacity: _transcript.isEmpty ? 0.0 : 1.0,
-                      child: Text(
-                        _transcript,
-                        textAlign: TextAlign.center,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          height: 1.4,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                      SizedBox(height: h * 0.012),
 
-                // 底部倒數計時
-                Positioned(
-                  left: 0, right: 0, bottom: h * timerBottomFrac,
-                  child: SafeArea(
-                    top: false,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.35),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '剩餘時間  ${_mmss(_secLeft)}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.5,
+                      // 底部倒數計時
+                      Center(
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: padX, vertical: padY),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.35),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '剩餘時間  ${_mmss(_secLeft)}',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: fsTimer,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                            ),
                           ),
                         ),
                       ),
-                    ),
+
+                      SizedBox(height: h * 0.01),
+                    ],
                   ),
                 ),
               ],
