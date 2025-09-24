@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'pages/guest_start_page.dart';
+import 'pages/guest_start.dart';
 
 void main() => runApp(const PsycheApp());
 

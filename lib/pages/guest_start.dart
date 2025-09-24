@@ -1,16 +1,74 @@
 import 'package:flutter/material.dart';
-import 'auth_page.dart';
-import 'session_page.dart';
-import 'conversation_list_page.dart';
+import 'auth.dart';
+import 'session.dart';
+import 'conversation_list.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'user_profile.dart';
+import '../services/packs_manager.dart';
 
-class GuestStartPage extends StatelessWidget {
+class GuestStartPage extends StatefulWidget {
   const GuestStartPage({super.key});
 
+  @override
+  State<GuestStartPage> createState() => _GuestStartPageState();
+}
+
+class _GuestStartPageState extends State<GuestStartPage> {
   Future<bool> _isLoggedIn() async {
     final sp = await SharedPreferences.getInstance();
     return sp.getBool('logged_in') ?? false;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 初始化套餐管理器並監聽變化
+    PacksManager.I.init();
+    PacksManager.I.addListener(_onPacksChanged);
+  }
+
+  void _onPacksChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    PacksManager.I.removeListener(_onPacksChanged);
+    super.dispose();
+  }
+
+  void _startSession(BuildContext context) {
+    final packs = PacksManager.I.packs30;
+    if (packs <= 0) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF0F2533),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Text('次數不足', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          content: const Text('目前沒有可用的 30 分鐘套餐，請先前往個人頁面購買。', style: TextStyle(color: Colors.white70, height: 1.4)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('知道了'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const UserProfilePage()));
+              },
+              child: const Text('去購買'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // 有次數，允許進入會話
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SessionPage()),
+    );
   }
 
   @override
@@ -25,6 +83,7 @@ class GuestStartPage extends StatelessWidget {
           }
 
           final loggedIn = snap.data == true;
+          final packs = PacksManager.I.packs30;
 
           // 顯示首頁，但右上角依登入狀態切換為「User Profile」或「登入 / 註冊」
           return SafeArea(
@@ -69,6 +128,24 @@ class GuestStartPage extends StatelessWidget {
                         ),
                       ),
 
+                      // 套餐剩餘顯示（在頂部展示）
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          margin: EdgeInsets.only(top: h * 0.004, bottom: h * 0.008),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF102431),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: Text(
+                            '剩餘套餐：$packs',
+                            style: const TextStyle(color: Color(0xFFEAF0F6), fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+
                       // 中間：主操作區域
                       Expanded(
                         child: Center(
@@ -78,7 +155,7 @@ class GuestStartPage extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                // 主按鈕：立即開始
+                                // 主按鈕：立即開始（若無次數則彈窗提示）
                                 SizedBox(
                                   height: btnHeightPrimary,
                                   child: ElevatedButton(
@@ -89,11 +166,7 @@ class GuestStartPage extends StatelessWidget {
                                         borderRadius: BorderRadius.circular(h * 0.016),
                                       ),
                                     ),
-                                    onPressed: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(builder: (_) => const SessionPage()),
-                                      );
-                                    },
+                                    onPressed: () => _startSession(context),
                                     child: Text(
                                       '立即開始',
                                       style: TextStyle(

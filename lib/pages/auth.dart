@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'guest_start_page.dart';
+import 'guest_start.dart';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});

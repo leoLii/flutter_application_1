@@ -2,9 +2,10 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
 import '../services/auth_manager.dart';
-import 'guest_start_page.dart';
+import '../services/packs_manager.dart';
+import 'guest_start.dart';
 
 class UserProfilePage extends StatefulWidget {
   const UserProfilePage({super.key});
@@ -14,20 +15,25 @@ class UserProfilePage extends StatefulWidget {
 }
 
 class _UserProfilePageState extends State<UserProfilePage> {
-  // ===== In‑App Purchase (IAP) =====
+  // ===== In-App Purchase (IAP) =====
   static const String _kProductId = 'minutes_30_twd'; // 30 分鐘（NT$50）
   final InAppPurchase _iap = InAppPurchase.instance;
   StreamSubscription<List<PurchaseDetails>>? _purchaseSub;
   bool _available = false;
   bool _loading = true;
   List<ProductDetails> _products = const [];
-  int _packs30 = 0; // 尚餘的 30 分鐘套餐數
 
   @override
   void initState() {
     super.initState();
     _initIAP();
-    _loadPacks();
+    // 初始化並監聽全局套餐管理器
+    PacksManager.I.init();
+    PacksManager.I.addListener(_onPacksChanged);
+  }
+
+  void _onPacksChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _initIAP() async {
@@ -49,26 +55,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
       });
     } else {
       setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _loadPacks() async {
-    final sp = await SharedPreferences.getInstance();
-    setState(() {
-      _packs30 = sp.getInt('packs_30') ?? 0;
-    });
-  }
-
-  Future<void> _addPackTrick() async {
-    final sp = await SharedPreferences.getInstance();
-    _packs30 = (sp.getInt('packs_30') ?? 0) + 1;
-    await sp.setInt('packs_30', _packs30);
-    if (mounted) {
-      setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已充值：+1 套 30 分鐘（測試）')),
-      );
-      Navigator.maybePop(context); // 關閉彈窗（若存在）
     }
   }
 
@@ -109,6 +95,17 @@ class _UserProfilePageState extends State<UserProfilePage> {
     }
   }
 
+  /// 測試用：不走 IAP，直接本地+1 套 30 分鐘
+  Future<void> _addPackTrick() async {
+    await PacksManager.I.addPacks(1);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已充值：+1 套 30 分鐘（測試）')),
+    );
+    Navigator.maybePop(context); // 關閉彈窗（若存在）
+  }
+
+  /// 真正發起 IAP（未開啟：先保留）
   Future<void> _buy30Min() async {
     if (!_available || _products.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,6 +121,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
   @override
   void dispose() {
     _purchaseSub?.cancel();
+    PacksManager.I.removeListener(_onPacksChanged);
     super.dispose();
   }
 
@@ -136,7 +134,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
       ),
       builder: (ctx) {
         final size = MediaQuery.of(ctx).size;
-        final h = size.height; final fsBody = h * 0.018; final fsTitle = h * 0.022;
+        final h = size.height; 
+        final fsBody = h * 0.018;
+
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           child: Column(
@@ -155,7 +155,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
               ),
               const SizedBox(height: 8),
               Text(
-                '30 分鐘對話時長（NT50）\n用於語音對話、識別與背景效果等所有功能。',
+                '30 分鐘對話時長（NT\$50）\n用於語音對話、識別與背景效果等所有功能。',
                 style: TextStyle(color: Colors.white70, fontSize: fsBody, height: 1.4),
               ),
               const SizedBox(height: 16),
@@ -174,7 +174,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
                       foregroundColor: const Color(0xFF143343),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    onPressed: _addPackTrick, // 暫用本地充值（測試）
+                    // TODO: 上線時切回 _buy30Min
+                    onPressed: _addPackTrick,
                     child: Text('購買 30 分鐘（NT\$50）', style: TextStyle(fontSize: fsBody, fontWeight: FontWeight.w700)),
                   ),
                 ),
@@ -198,6 +199,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
         final fsBody  = h * 0.018;
         final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
 
+        final packs = PacksManager.I.packs30;
+        final minutes = PacksManager.I.totalMinutes;
+
         return Scaffold(
           backgroundColor: const Color(0xFF0C1C24),
           body: SafeArea(
@@ -219,12 +223,14 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   CircleAvatar(
                     radius: s * 0.1,
                     backgroundColor: const Color(0xFFA7C7E7),
-                    child: Text(initial,
-                        style: TextStyle(
-                          fontSize: s * 0.08,
-                          color: const Color(0xFF143343),
-                          fontWeight: FontWeight.bold,
-                        )),
+                    child: Text(
+                      initial,
+                      style: TextStyle(
+                        fontSize: s * 0.08,
+                        color: const Color(0xFF143343),
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                   SizedBox(height: h * 0.02),
                   Text(
@@ -254,18 +260,19 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                '剩餘套餐：$_packs30 個（每個 30 分鐘）',
+                                '剩餘套餐：$packs 個（每個 30 分鐘）',
                                 style: TextStyle(color: Colors.white, fontSize: fsBody, fontWeight: FontWeight.w600),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '合計可用：${_packs30 * 30} 分鐘',
+                                '合計可用：$minutes 分鐘',
                                 style: TextStyle(color: Colors.white70, fontSize: fsBody * 0.9),
                               ),
                             ],
                           ),
                         ),
                         TextButton(
+                          // 測試充值：+1 套
                           onPressed: _addPackTrick,
                           child: const Text('充值 1 組（測試）'),
                         ),

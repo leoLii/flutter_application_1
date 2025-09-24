@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import '../services/packs_manager.dart';
 
 class SessionPage extends StatefulWidget {
   const SessionPage({super.key});
@@ -20,6 +20,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   int _secLeft = _totalSeconds;
   Timer? _ticker;
   bool _started = false;
+  bool _paused = false; // 是否暫停對話（暫停倒計時與錄音）
   final List<double> _seeds = List<double>.generate(6, (i) => (i + 1) * 0.173); // 流動用相位偏移
 
   // 語音識別
@@ -48,15 +49,15 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
     _ticker?.cancel();
     _flow.dispose();
     _ctrl.dispose();
-    if (_listening) {
-      _stt.stop();
-    }
+    try { _stt.stop(); } catch (_) {}
+    try { _stt.cancel(); } catch (_) {}
     _scrollCtl.dispose();
     _overlayCtl.dispose();
     super.dispose();
   }
   void _scrollOverlayToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (_overlayCtl.hasClients) {
         _overlayCtl.animateTo(
           _overlayCtl.position.maxScrollExtent,
@@ -67,23 +68,10 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
     });
   }
 
-  void _startCountdown() {
-    if (_started) return; // 防止重複啟動
-    setState(() {
-      _started = true;
-      _secLeft = _totalSeconds; // 每次啟動從 60 秒開始
-    });
-
-    _ctrl
-      ..reset()
-      ..forward();
-    _flow
-      ..reset()
-      ..repeat();
-
+  void _startTicker() {
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (t) async {
-      if (!mounted) return;
+      if (!mounted || _paused) return; // 暫停時不遞減
       setState(() {
         _secLeft = (_secLeft > 0) ? _secLeft - 1 : 0;
       });
@@ -99,15 +87,58 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
           try { await _stt.stop(); } catch (_) {}
           setState(() => _listening = false);
         }
-        // 允許之後再次開始新一輪 1 分鐘窗口
         _started = false;
+        // 消耗 1 分鐘（從 30 分鐘套餐中以分鐘粒度扣），失敗則不動
+        await PacksManager.I.tryConsumeMinutes(1);
         if (mounted) {
+          setState(() {}); // 觸發 UI 刷新剩餘分鐘/套餐
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('時間到')),
+            const SnackBar(content: Text('時間到，已扣除 1 分鐘')),
           );
         }
       }
     });
+  }
+
+  void _startCountdown() {
+    if (_started) return; // 防止重複啟動
+    setState(() {
+      _started = true;
+      _paused = false;
+      _secLeft = _totalSeconds; // 每次啟動從 60 秒開始
+    });
+
+    _ctrl
+      ..reset()
+      ..forward();
+    _flow
+      ..reset()
+      ..repeat();
+
+    _startTicker();
+  }
+
+  Future<void> _togglePause() async {
+    if (!_started) return; // 未開始無需暫停
+    setState(() => _paused = !_paused);
+    if (_paused) {
+      // 暫停：停止錄音與動畫（保留剩餘秒）
+      _flow.stop();
+      if (_listening) {
+        try { await _stt.stop(); } catch (_) {}
+        setState(() => _listening = false);
+      }
+    } else {
+      // 繼續：恢復動畫與錄音（若窗口仍有效）
+      _flow.repeat();
+      if (_secLeft > 0 && !_listening) {
+        _resumeIfWindowActive();
+      }
+      // 計時器在暫停時未遞減，這裡確保存在
+      if (_ticker == null) {
+        _startTicker();
+      }
+    }
   }
 
   /// Robustly pick a Chinese locale (prefer Simplified, fallback to Traditional, then default).
@@ -132,9 +163,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
         orElse: () => stt.LocaleName('', ''),
       ).localeId;
 
-      // 3) 若仍無中文，嘗試常見別名（有些裝置不在列表卻能接受）
-      pick ??= ['zh-CN','zh_CN','zh-Hans','cmn-Hans-CN','zh-TW','zh_TW','zh-Hant','yue-Hant-HK']
-          .firstWhere((id) => true, orElse: () => '');
 
       if (pick.isNotEmpty) return pick;
     } catch (_) {}
@@ -185,6 +213,8 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   Future<void> _beginListen() async {
     await _stt.listen(
       onResult: (r) {
+        if (!mounted) return; // widget 已被移除，忽略回調
+        if (!mounted) return;
         setState(() => _transcript = r.recognizedWords);
         _scrollOverlayToEnd();
         if (r.finalResult) {
@@ -243,6 +273,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   }
 
   void _onSttStatus(String s) {
+    if (!mounted) return;
     // speech_to_text 狀態回調
     if (s == 'notListening') {
       setState(() => _listening = false);
@@ -258,6 +289,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   }
 
   void _onSttError(dynamic e) {
+    if (!mounted) return;
     final msg = (e is Exception) ? e.toString() : '$e';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('語音錯誤：$msg')),
@@ -369,16 +401,14 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                             height: h * 0.05,
                             child: Stack(
                               children: [
-                                // 顯示返回圖示
                                 Align(
                                   alignment: Alignment.centerLeft,
                                   child: Icon(
                                     Icons.arrow_back_ios_new_rounded,
                                     color: Colors.white,
-                                    size: h * 0.028, // 相對尺寸
+                                    size: h * 0.028,
                                   ),
                                 ),
-                                // 點擊熱區（覆蓋整個區域）
                                 Positioned.fill(
                                   child: Material(
                                     color: Colors.transparent,
@@ -392,6 +422,24 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                             ),
                           ),
                           const Spacer(),
+                          // DEBUG 扣一次 30 分鐘套餐
+                          TextButton(
+                            onPressed: () async {
+                              if (PacksManager.I.packs30 <= 0) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('沒有可扣的套餐')),
+                                );
+                                return;
+                              }
+                              await PacksManager.I.addPacks(-1);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('DEBUG：已扣除 1 組（30 分鐘）')),
+                              );
+                            },
+                            child: const Text('DEBUG-扣1組', style: TextStyle(color: Colors.white70)),
+                          ),
                         ],
                       ),
 
@@ -507,6 +555,53 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                       ),
 
                       SizedBox(height: h * 0.012),
+
+                      // 暫停/繼續控制 + 暫停時顯示帳戶剩餘分鐘
+                      Center(
+                        child: Column(
+                          children: [
+                            SizedBox(
+                              height: h * 0.05,
+                              child: TextButton.icon(
+                                onPressed: _togglePause,
+                                icon: Icon(_paused ? Icons.play_arrow_rounded : Icons.pause_rounded, color: Colors.white),
+                                label: Text(_paused ? '繼續對話' : '暫停對話', style: TextStyle(color: Colors.white, fontSize: fsBody)),
+                              ),
+                            ),
+                            AnimatedOpacity(
+                              duration: const Duration(milliseconds: 220),
+                              opacity: _paused ? 1.0 : 0.0,
+                              child: Padding(
+                                padding: EdgeInsets.only(top: h * 0.004),
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: padX, vertical: padY * 0.9),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.38),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '本次剩餘 ${_mmss(_secLeft)}',
+                                        style: TextStyle(color: Colors.white, fontSize: fsTimer, fontWeight: FontWeight.w700),
+                                      ),
+                                      SizedBox(height: h * 0.004),
+                                      Text(
+                                        '帳戶剩餘 ${PacksManager.I.totalMinutes} 分鐘',
+                                        style: TextStyle(color: Colors.white70, fontSize: fsTimer * 0.9),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      SizedBox(height: h * 0.008),
 
                       // 中央錄音按鈕
                       Center(
