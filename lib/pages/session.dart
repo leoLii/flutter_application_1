@@ -306,94 +306,95 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0C1C24),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final w = constraints.maxWidth;
-            final h = constraints.maxHeight;
+      body: Stack(
+        children: [
+          // === 背景：放在 SafeArea 之外，真正全屏鋪滿 ===
+          const Positioned.fill(
+            child: ColoredBox(color: Color(0xFF1E88E5)),
+          ),
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: Listenable.merge([_ctrl, _flow]),
+              builder: (_, __) {
+                final t = _ctrl.value;                   // 0→1：橙色覆蓋比例逐漸增多
+                final phase = _flow.value * 2 * math.pi; // 流動相位
 
-            // 相對尺寸（文字、間距、圓角、圖示等）
-            final s = math.min(w, h);
-            final fsBody     = h * (15.0 / 932.25);
-            final fsSubtitle = h * (16.0 / 932.25);
-            final fsTimer    = h * (14.0 / 932.25);
-            final padX       = s * (12.0 / 553.082989);
-            final padY       = s * (8.0  / 553.082989);
-            final bubbleR    = s * (12.0 / 553.082989);
-            final iconSize   = h * (64.0 / 932.25);
-            final blurR      = s * (24.0 / 553.082989);
-            final spreadR    = s * (6.0  / 553.082989);
+                const cloudOrange = Color(0xFFFF8A00);
+                final blobs = <Widget>[];
+                for (var i = 0; i < _seeds.length; i++) {
+                  final seed = _seeds[i];
+                  final baseX = 0.5 + 0.45 * math.sin(phase * (0.6 + 0.1 * i) + seed * 8.0);
+                  final baseY = 0.5 + 0.35 * math.cos(phase * (0.5 + 0.07 * i) + seed * 6.0);
 
-            // 位置/比例（由原設計值換算而來）
-            const bubbleMaxWFrac  = 360.0 / 553.082989;
-            const micSizeFrac     = 140.0 / 553.082989; // 以寬為準
+                  final minR = 0.14; // 相對於畫面短邊
+                  final maxR = 0.34;
+                  final radius = (minR + (maxR - minR) * (0.35 + 0.65 * t));
+                  final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
 
-            return Stack(
-              children: [
-                // 背景：純藍底 + SVG
-                const Positioned.fill(
-                  child: ColoredBox(color: Color(0xFF1E88E5)),
-                ),
+                  // 使用 MediaQuery 尺寸，確保背景不受 SafeArea 影響
+                  final size = MediaQuery.of(context).size;
+                  final w = size.width;
+                  final h = size.height;
+                  final cx = w * baseX;
+                  final cy = h * baseY;
+                  final r  = math.min(w, h) * radius;
 
-                // 彩雲層（仍舊鋪滿）
-                Positioned.fill(
-                  child: AnimatedBuilder(
-                    animation: Listenable.merge([_ctrl, _flow]),
-                    builder: (_, __) {
-                      final t = _ctrl.value;                   // 0→1：橙色覆蓋比例逐漸增多
-                      final phase = _flow.value * 2 * math.pi; // 流動相位
-
-                      const cloudOrange = Color(0xFFFF8A00);
-                      final blobs = <Widget>[];
-                      for (var i = 0; i < _seeds.length; i++) {
-                        final seed = _seeds[i];
-                        final baseX = 0.5 + 0.45 * math.sin(phase * (0.6 + 0.1 * i) + seed * 8.0);
-                        final baseY = 0.5 + 0.35 * math.cos(phase * (0.5 + 0.07 * i) + seed * 6.0);
-
-                        final minR = 0.14; // 相對於畫面短邊
-                        final maxR = 0.34;
-                        final radius = (minR + (maxR - minR) * (0.35 + 0.65 * t));
-                        final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
-
-                        final cx = w * baseX;
-                        final cy = h * baseY;
-                        final r  = math.min(w, h) * radius;
-
-                        blobs.add(
-                          Positioned(
-                            left: cx - r,
-                            top: cy - r,
-                            width: r * 2,
-                            height: r * 2,
-                            child: IgnorePointer(
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: RadialGradient(
-                                    colors: [
-                                      cloudOrange.withOpacity(alpha),
-                                      cloudOrange.withOpacity(0.0),
-                                    ],
-                                    stops: const [0.0, 1.0],
-                                  ),
-                                ),
-                              ),
+                  blobs.add(
+                    Positioned(
+                      left: cx - r,
+                      top: cy - r,
+                      width: r * 2,
+                      height: r * 2,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              colors: [
+                                cloudOrange.withOpacity(alpha),
+                                cloudOrange.withOpacity(0.0),
+                              ],
+                              stops: const [0.0, 1.0],
                             ),
                           ),
-                        );
-                      }
-                      return Stack(children: blobs);
-                    },
-                  ),
-                ),
+                        ),
+                      ),
+                    ),
+                  );
+                }
+                return Stack(children: blobs);
+              },
+            ),
+          ),
 
-                // 前景 UI：使用 Column + Align，不再用大量 Positioned
-                Padding(
+          // === 前景內容：放在 SafeArea 之內，避免被瀏海/手勢區遮擋 ===
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final w = constraints.maxWidth;
+                final h = constraints.maxHeight;
+
+                // 相對尺寸（文字、間距、圓角、圖示等）
+                final s = math.min(w, h);
+                final fsBody     = h * (15.0 / 932.25);
+                final fsSubtitle = h * (16.0 / 932.25);
+                final fsTimer    = h * (14.0 / 932.25);
+                final padX       = s * (12.0 / 553.082989);
+                final padY       = s * (8.0  / 553.082989);
+                final bubbleR    = s * (12.0 / 553.082989);
+                final iconSize   = h * (64.0 / 932.25);
+                final blurR      = s * (24.0 / 553.082989);
+                final spreadR    = s * (6.0  / 553.082989);
+
+                const bubbleMaxWFrac  = 360.0 / 553.082989;
+                const micSizeFrac     = 140.0 / 553.082989; // 以寬為準
+
+                return Padding(
                   padding: EdgeInsets.symmetric(horizontal: w * 0.06),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 頂部：返回
+                      // 頂部：返回 + DEBUG 扣 1 組
                       Row(
                         children: [
                           SizedBox(
@@ -422,7 +423,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                             ),
                           ),
                           const Spacer(),
-                          // DEBUG 扣一次 30 分鐘套餐
                           TextButton(
                             onPressed: () async {
                               if (PacksManager.I.packs30 <= 0) {
@@ -496,7 +496,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                             ),
                             child: Container(
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.12),  // 近似透明，便於可讀
+                                color: Colors.black.withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
                               ),
@@ -512,7 +512,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        // 顯示最近幾條已提交的對話（可視化上下文）
                                         ..._messages.take(_messages.length).skip((_messages.length - 6).clamp(0, _messages.length)).map((m) => Padding(
                                               padding: EdgeInsets.only(bottom: h * 0.006),
                                               child: Text(
@@ -520,7 +519,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                                                 style: TextStyle(color: Colors.white.withOpacity(0.86), fontSize: fsBody, height: 1.35),
                                               ),
                                             )),
-                                        // 實時流式字幕（帶閃爍光標）
                                         if (_transcript.isNotEmpty || _listening)
                                           Row(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -531,7 +529,6 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                                                   style: TextStyle(color: Colors.white, fontSize: fsSubtitle, height: 1.35, fontWeight: FontWeight.w600),
                                                 ),
                                               ),
-                                              // 使用 _flow 的相位做簡易閃爍
                                               AnimatedBuilder(
                                                 animation: _flow,
                                                 builder: (_, __) {
@@ -556,7 +553,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
 
                       SizedBox(height: h * 0.012),
 
-                      // 暫停/繼續控制 + 暫停時顯示帳戶剩餘分鐘
+                      // 暫停/繼續控制 + 暫停時顯示剩餘（本次 + 帳戶）
                       Center(
                         child: Column(
                           children: [
@@ -665,11 +662,11 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                       SizedBox(height: h * 0.01),
                     ],
                   ),
-                ),
-              ],
-            );
-          },
-        ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

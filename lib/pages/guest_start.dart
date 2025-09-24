@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'auth.dart';
 import 'session.dart';
 import 'conversation_list.dart';
@@ -37,16 +38,49 @@ class _GuestStartPageState extends State<GuestStartPage> {
     super.dispose();
   }
 
-  void _startSession(BuildContext context) {
+  void _promptLogin(BuildContext ctx) {
+    showDialog(
+      context: ctx,
+      builder: (d) => AlertDialog(
+        backgroundColor: const Color(0xFF0F2533),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('需要登入', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        content: const Text('請先登入才能開始對話。', style: TextStyle(color: Colors.white70, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('取消')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(d);
+              Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => const AuthPage()));
+            },
+            child: const Text('去登入'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startSession(BuildContext context) async {
+    // 每次點擊時動態讀取登入狀態，避免使用過期的 build 值
+    final sp = await SharedPreferences.getInstance();
+    final loggedIn = sp.getBool('logged_in') ?? false;
+
+    if (!loggedIn) {
+      if (!mounted) return;
+      _promptLogin(context);
+      return;
+    }
+
     final packs = PacksManager.I.packs30;
     if (packs <= 0) {
+      if (!mounted) return;
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: const Color(0xFF0F2533),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: const Text('次數不足', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-          content: const Text('目前沒有可用的 30 分鐘套餐，請先前往個人頁面購買。', style: TextStyle(color: Colors.white70, height: 1.4)),
+          content: const Text('目前沒有可用的 30 分鐘套餐，是否前往個人頁面購買？', style: TextStyle(color: Colors.white70, height: 1.4)),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -66,6 +100,7 @@ class _GuestStartPageState extends State<GuestStartPage> {
     }
 
     // 有次數，允許進入會話
+    if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const SessionPage()),
     );
@@ -128,6 +163,24 @@ class _GuestStartPageState extends State<GuestStartPage> {
                         ),
                       ),
 
+                      // 中上方顯示機器人圖片
+                      Padding(
+                        padding: EdgeInsets.only(top: h * 0.04, bottom: h * 0.02),
+                        child: Center(
+                          child: SvgPicture.asset(
+                            'assets/images/robot.svg',
+                            width: w * 0.4,
+                            fit: BoxFit.contain,
+                            semanticsLabel: 'Robot',
+                            placeholderBuilder: (_) => SizedBox(
+                              width: w * 0.1,
+                              height: w * 0.1,
+                              child: const CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        ),
+                      ),
+
                       // 套餐剩餘顯示（在頂部展示）
                       Align(
                         alignment: Alignment.centerRight,
@@ -166,7 +219,9 @@ class _GuestStartPageState extends State<GuestStartPage> {
                                         borderRadius: BorderRadius.circular(h * 0.016),
                                       ),
                                     ),
-                                    onPressed: () => _startSession(context),
+                                    onPressed: loggedIn
+                                        ? () => _startSession(context)
+                                        : () => _promptLogin(context),
                                     child: Text(
                                       '立即開始',
                                       style: TextStyle(
