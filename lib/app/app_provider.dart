@@ -12,6 +12,7 @@ class AppProviders extends StatelessWidget {
       providers: [
         ChangeNotifierProvider.value(value: DI.auth),
         ChangeNotifierProvider.value(value: DI.packs),
+        ChangeNotifierProvider.value(value: DI.conversation),
       ],
       child: child,
     );

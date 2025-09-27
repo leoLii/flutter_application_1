@@ -1,138 +1,135 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
-/// 簡單對話資料模型（可之後抽到 data/models.dart）
-class Conversation {
-  final String id;
-  String title;
-  String lastMessage;
-  DateTime updatedAt;
-  int messageCount;
+import '../controllers/conversation_controller.dart';
+import '../../domain/entities/conversation.dart' as domain;
 
-  Conversation({
-    required this.id,
-    required this.title,
-    required this.lastMessage,
-    required this.updatedAt,
-    required this.messageCount,
-  });
-}
-
-/// 對話列表頁
-/// - 可直接使用，也可透過傳入 initialConversations 與回調接上你的資料層
+/// 對話列表頁（Isar + Controller 版本）
 class ConversationListPage extends StatefulWidget {
-  const ConversationListPage({
-    super.key,
-    this.initialConversations,
-    this.onOpenConversation,
-    this.onCreateConversation,
-    this.onDeleteConversation,
-  });
-
-  /// 初始資料（不傳則用示例資料）
-  final List<Conversation>? initialConversations;
-
-  /// 點擊項目時的回調（未提供時，預設彈出提示）
-  final void Function(Conversation conv)? onOpenConversation;
-
-  /// 點擊右下角新增時回調（未提供時，頁面會本地新增一筆示例）
-  final Conversation Function()? onCreateConversation;
-
-  /// 左滑刪除時回調（未提供時，本地刪除）
-  final void Function(Conversation conv)? onDeleteConversation;
+  const ConversationListPage({super.key});
 
   @override
   State<ConversationListPage> createState() => _ConversationListPageState();
 }
 
 class _ConversationListPageState extends State<ConversationListPage> {
-  final List<Conversation> _items = <Conversation>[];
-  bool _loading = true;
-
-  // ===== Timeline & grouping state =====
-  late DateTime _todayDate;                 // yyyy-MM-dd (no time)
-  late List<DateTime> _days;               // timeline days from today going back
-  int _timelineIndex = 0;                  // 0 = today
-  final ScrollController _stackCtl = ScrollController(); // for future use (if scrollable content)
-  final ScrollController _mainScroll = ScrollController(); // 跨日滾動
-  final Map<DateTime, GlobalKey> _sectionKeys = <DateTime, GlobalKey>{}; // 每日段落定位
-  late DateTime _minDay; // 最早有資料的日期（去時分秒）
-  late DateTime _maxDay; // 最晚有資料的日期（去時分秒）
-  Map<DateTime, List<Conversation>> _byDay = <DateTime, List<Conversation>>{};
+  // 視圖狀態（與資料無關）
+  final ScrollController _mainScroll = ScrollController();
+  final Map<DateTime, GlobalKey> _sectionKeys = <DateTime, GlobalKey>{};
+  int _timelineIndex = 0; // 0 = 最早；會根據 days 長度調整
+  bool _scrollTickScheduled = false;
 
   DateTime _dateKey(DateTime d) => DateTime(d.year, d.month, d.day);
-
-  DateTime get _selectedDate => _days[_timelineIndex];
 
   @override
   void initState() {
     super.initState();
-    _bootstrap();
+    // 若未初始化，這裡不強行調用 init（在 DI.init() 中做）；
+    // 但首次進頁可手動 refresh 一次，避免空白
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final ctl = context.read<ConversationController>();
+      if (ctl.days.isEmpty) {
+        await ctl.refreshAll();
+        if (!mounted) return;
+        _resetTimelineIndex();
+      } else {
+        _resetTimelineIndex();
+      }
+    });
   }
 
-  void _bootstrap() async {
-    final seed = widget.initialConversations ?? _demoSeed();
-    _items
-      ..clear()
-      ..addAll(seed..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)));
+  @override
+  void dispose() {
+    _mainScroll.dispose();
+    super.dispose();
+  }
 
-    _rebuildGroups();
-
-    // 依據資料決定日期範圍：從第一筆（最早）到最後一筆（最晚）
-    if (_items.isNotEmpty) {
-      final allDays = _items.map((e) => _dateKey(e.updatedAt)).toList();
-      allDays.sort((a, b) => a.compareTo(b));
-      _minDay = allDays.first;
-      _maxDay = allDays.last;
-      final total = _maxDay.difference(_minDay).inDays + 1;
-      _days = List.generate(total, (i) => _minDay.add(Duration(days: i)));
-      _timelineIndex = _days.length - 1; // 起始停留在第一天（第一個保存的卡片那天）
-    } else {
-      final today = _dateKey(DateTime.now());
-      _minDay = today;
-      _maxDay = today;
-      _days = [today];
-      _timelineIndex = _days.length - 1;
+  void _resetTimelineIndex() {
+    final ctl = context.read<ConversationController>();
+    if (ctl.days.isEmpty) {
+      setState(() => _timelineIndex = 0);
+      return;
     }
-
-    setState(() => _loading = false);
+    // 停在最新一天（最後一個）
+    setState(() => _timelineIndex = ctl.days.length - 1);
   }
 
-  void _rebuildGroups() {
-    final map = <DateTime, List<Conversation>>{};
-    for (final c in _items) {
-      final k = _dateKey(c.updatedAt);
-      (map[k] ??= <Conversation>[]).add(c);
-    }
-    // 每日內由新到舊
-    map.forEach((k, v) => v.sort((a, b) => b.updatedAt.compareTo(a.updatedAt)));
-    _byDay = map;
+  Future<void> _bootstrap() async {
+    await context.read<ConversationController>().refreshAll();
+    if (!mounted) return;
+    _resetTimelineIndex();
   }
 
-  void _ensureMoreDays(int needBeyond) {
-    // 已不再需要無限延展
+  void _open(domain.Conversation c) {
+    // 這裡保留提示；接 SessionPage 可在此跳轉
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('打開對話：${c.title} (id=${c.id})')),
+    );
   }
 
-  List<Conversation> _demoSeed() {
-    final now = DateTime.now();
-    final rng = math.Random(42);
-    final List<Conversation> list = [];
-    for (int d = 0; d < 10; d++) {
-      final day = DateTime(now.year, now.month, now.day).subtract(Duration(days: d));
-      final perDay = 1 + rng.nextInt(3); // 每天 1~3 筆
-      for (int i = 0; i < perDay; i++) {
-        final t = day.add(Duration(hours: rng.nextInt(23), minutes: rng.nextInt(59)));
-        list.add(Conversation(
-          id: 'demo_${d}_$i',
-          title: '對話 ${d + 1}-${i + 1}',
-          lastMessage: i == 0 && d == 0 ? '歡迎回來，點擊開始新的 1 分鐘對話' : '這是歷史訊息摘要…',
-          updatedAt: t,
-          messageCount: 1 + rng.nextInt(6),
-        ));
+  Future<void> _create() async {
+    final ctl = context.read<ConversationController>();
+    final n = ctl.days.fold<int>(0, (p, d) => p + (ctl.byDay[d]?.length ?? 0)) + 1;
+    final c = await ctl.create('新的對話 $n');
+    if (!mounted) return;
+    _open(c);
+  }
+
+  Future<void> _delete(domain.Conversation c) async {
+    await context.read<ConversationController>().deleteConv(c.id);
+  }
+
+  void _jumpToDay(int idx) {
+    final ctl = context.read<ConversationController>();
+    final days = ctl.days;
+    if (idx < 0 || idx >= days.length) return;
+    setState(() => _timelineIndex = idx);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _sectionKeys[days[idx]];
+      if (key?.currentContext != null) {
+        Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOut,
+          alignment: 0.05,
+        );
+      }
+    });
+  }
+
+  void _scheduleScrollUpdate() {
+    if (_scrollTickScheduled) return;
+    _scrollTickScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollTickScheduled = false;
+      _updateCurrentDayByViewport();
+    });
+  }
+
+  void _updateCurrentDayByViewport() {
+    final ctl = context.read<ConversationController>();
+    final days = ctl.days;
+    if (days.isEmpty) return;
+    double bestDy = double.infinity;
+    int bestIdx = _timelineIndex;
+    for (var i = 0; i < days.length; i++) {
+      final key = _sectionKeys[days[i]];
+      final ctx = key?.currentContext;
+      if (ctx == null) continue;
+      final rb = ctx.findRenderObject() as RenderBox?;
+      if (rb == null) continue;
+      final dy = rb.localToGlobal(Offset.zero).dy;
+      final dist = (dy - kToolbarHeight).abs();
+      if (dist < bestDy) {
+        bestDy = dist;
+        bestIdx = i;
       }
     }
-    return list;
+    if (bestIdx != _timelineIndex) {
+      setState(() => _timelineIndex = bestIdx);
+    }
   }
 
   String _fmtTime(DateTime t) {
@@ -146,92 +143,16 @@ class _ConversationListPageState extends State<ConversationListPage> {
       final mm = d.minute.toString().padLeft(2, '0');
       return '$hh:$mm';
     }
-    return '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
-  }
-
-  void _open(Conversation c) {
-    if (widget.onOpenConversation != null) {
-      widget.onOpenConversation!(c);
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('打開對話：${c.title} (id=${c.id})')),
-    );
-  }
-
-  void _create() {
-    Conversation c;
-    if (widget.onCreateConversation != null) {
-      c = widget.onCreateConversation!();
-    } else {
-      final n = _items.length + 1;
-      c = Conversation(
-        id: 'local_${DateTime.now().millisecondsSinceEpoch}',
-        title: '新的對話 $n',
-        lastMessage: '（開始說話後會出現訊息）',
-        updatedAt: DateTime.now(),
-        messageCount: 0,
-      );
-    }
-    setState(() {
-      _items.insert(0, c);
-    });
-    _open(c);
-  }
-
-  void _delete(Conversation c) {
-    if (widget.onDeleteConversation != null) {
-      widget.onDeleteConversation!(c);
-    }
-    setState(() {
-      _items.removeWhere((e) => e.id == c.id);
-    });
-  }
-
-  void _jumpToDay(int idx) {
-    if (idx < 0 || idx >= _days.length) return;
-    setState(() => _timelineIndex = idx);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _sectionKeys[_days[idx]];
-      if (key?.currentContext != null) {
-        Scrollable.ensureVisible(
-          key!.currentContext!,
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeOut,
-          alignment: 0.05, // 對齊到頂部附近
-        );
-      }
-    });
-  }
-
-  void _onScrollUpdate(ScrollMetrics m) {
-    // 根據最接近頂部的日期標題，更新當前所屬日期索引
-    // 遍歷少量 key，找出和螢幕頂端距離最小的
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    double bestDy = double.infinity;
-    int bestIdx = _timelineIndex;
-    for (var i = 0; i < _days.length; i++) {
-      final key = _sectionKeys[_days[i]];
-      final ctx = key?.currentContext;
-      if (ctx == null) continue;
-      final rb = ctx.findRenderObject() as RenderBox?;
-      if (rb == null) continue;
-      final dy = rb.localToGlobal(Offset.zero).dy; // 與螢幕頂端距離
-      final dist = (dy - kToolbarHeight).abs();
-      if (dist < bestDy) {
-        bestDy = dist;
-        bestIdx = i;
-      }
-    }
-    if (bestIdx != _timelineIndex) {
-      setState(() => _timelineIndex = bestIdx);
-    }
+    return DateFormat('yyyy/MM/dd', 'zh_TW').format(d);
   }
 
   @override
   Widget build(BuildContext context) {
     const white = Color(0xFFEAF0F6);
+    final ctl = context.watch<ConversationController>();
+    final days = ctl.days;
+    final byDay = ctl.byDay;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         return SizedBox(
@@ -254,97 +175,109 @@ class _ConversationListPageState extends State<ConversationListPage> {
                   icon: const Icon(Icons.refresh, color: white),
                   tooltip: '重新整理',
                 ),
+                IconButton(
+                  onPressed: _create,
+                  icon: const Icon(Icons.add, color: white),
+                  tooltip: '新對話',
+                ),
               ],
             ),
-            body: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : NotificationListener<ScrollNotification>(
-                    onNotification: (n) {
-                      if (n is ScrollUpdateNotification) {
-                        _onScrollUpdate(n.metrics);
-                      }
-                      return false;
-                    },
-                    child: CustomScrollView(
-                      controller: _mainScroll,
-                      slivers: [
-                        // 置頂工具欄：今天快捷 + 滑桿（刻度式） + 當前日期
-                        SliverAppBar(
-                          pinned: true,
-                          backgroundColor: const Color(0xFF0C1C24),
-                          elevation: 0,
-                          toolbarHeight: 56,
-                          title: Row(
-                            children: [
-                              // 回到今天
-                              TextButton.icon(
-                                onPressed: () {
-                                  final idx = _days.indexOf(_maxDay);
-                                  if (idx != -1) _jumpToDay(idx);
-                                },
-                                style: TextButton.styleFrom(foregroundColor: const Color(0xFFEAF0F6)),
-                                icon: const Icon(Icons.today_outlined),
-                                label: const Text('今天'),
-                              ),
-                              const SizedBox(width: 8),
-                              // 刻度式滑桿（0=今天 → 越大越早）
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    trackHeight: 2.5,
-                                    tickMarkShape: const RoundSliderTickMarkShape(tickMarkRadius: 1.5),
-                                    activeTickMarkColor: Colors.white54,
-                                    inactiveTickMarkColor: Colors.white24,
-                                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                                  ),
-                                  child: Slider(
-                                    min: 0,
-                                    max: (_days.length - 1).toDouble(),
-                                    divisions: _days.length - 1,
-                                    value: _timelineIndex.clamp(0, _days.length - 1).toDouble(),
-                                    onChanged: (v) => _jumpToDay(v.round()),
+            body: days.isEmpty
+                ? const _EmptyState()
+                : RefreshIndicator(
+                    color: Colors.white,
+                    backgroundColor: const Color(0xFF143343),
+                    onRefresh: _bootstrap,
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (n) {
+                        if (n is ScrollUpdateNotification) {
+                          _scheduleScrollUpdate();
+                        }
+                        return false;
+                      },
+                      child: CustomScrollView(
+                        controller: _mainScroll,
+                        slivers: [
+                          // 置頂工具欄：今天快捷 + 滑桿（刻度式） + 當前日期
+                          SliverAppBar(
+                            pinned: true,
+                            backgroundColor: const Color(0xFF0C1C24),
+                            elevation: 0,
+                            toolbarHeight: 56,
+                            title: Row(
+                              children: [
+                                // 回到今天（最新一天）
+                                TextButton.icon(
+                                  onPressed: () {
+                                    final idx = days.length - 1;
+                                    if (idx >= 0) _jumpToDay(idx);
+                                  },
+                                  style: TextButton.styleFrom(foregroundColor: const Color(0xFFEAF0F6)),
+                                  icon: const Icon(Icons.today_outlined),
+                                  label: const Text('今天'),
+                                ),
+                                const SizedBox(width: 8),
+                                // 刻度式滑桿（0 = 最早 → 越大越新）
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      trackHeight: 2.5,
+                                      tickMarkShape: const RoundSliderTickMarkShape(tickMarkRadius: 1.5),
+                                      activeTickMarkColor: Colors.white54,
+                                      inactiveTickMarkColor: Colors.white24,
+                                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                                    ),
+                                    child: Slider(
+                                      min: 0,
+                                      max: (days.length - 1).toDouble(),
+                                      divisions: days.length > 1 ? days.length - 1 : null,
+                                      value: _timelineIndex.clamp(0, days.length - 1).toDouble(),
+                                      onChanged: (v) => _jumpToDay(v.round()),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              // 當前日期顯示
-                              Builder(
-                                builder: (_) {
-                                  final d = _selectedDate;
-                                  final txt = DateFormat('yyyy/MM/dd (EEE)').format(d);
-                                  return Text(
-                                    txt,
-                                    style: const TextStyle(color: Color(0xFFEAF0F6), fontSize: 12, fontWeight: FontWeight.w600),
-                                  );
-                                },
-                              ),
-                            ],
+                                const SizedBox(width: 8),
+                                // 當前日期顯示（本地化 zh_TW）
+                                Builder(
+                                  builder: (_) {
+                                    final d = days[_timelineIndex.clamp(0, days.length - 1)];
+                                    final txt = DateFormat('yyyy/MM/dd (EEE)', 'zh_TW').format(d);
+                                    return Text(
+                                      txt,
+                                      style: const TextStyle(color: Color(0xFFEAF0F6), fontSize: 12, fontWeight: FontWeight.w600),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
 
-                        // 跨日堆疊 section：每個日期一塊
-                        for (final day in _days) ...[
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              key: _sectionKeys.putIfAbsent(day, () => GlobalKey()),
-                              padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                              child: Text(
-                                DateFormat('yyyy/MM/dd EEE').format(day),
-                                style: const TextStyle(color: Color(0xFFEAF0F6), fontSize: 14, fontWeight: FontWeight.w700),
+                          // 跨日堆疊 section：每個日期一塊
+                          for (final day in days) ...[
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                key: _sectionKeys.putIfAbsent(day, () => GlobalKey()),
+                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                                child: Text(
+                                  DateFormat('yyyy/MM/dd EEE', 'zh_TW').format(day),
+                                  style: const TextStyle(color: Color(0xFFEAF0F6), fontSize: 14, fontWeight: FontWeight.w700),
+                                ),
                               ),
                             ),
-                          ),
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-                              child: _DayStack(
-                                conversations: _byDay[day] ?? const <Conversation>[],
-                                onOpen: _open,
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                                child: _DayStack(
+                                  conversations: byDay[day] ?? const <domain.Conversation>[],
+                                  onOpen: _open,
+                                  onDelete: _delete,
+                                  fmtTime: _fmtTime,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
           ),
@@ -355,9 +288,16 @@ class _ConversationListPageState extends State<ConversationListPage> {
 }
 
 class _DayStack extends StatelessWidget {
-  const _DayStack({required this.conversations, required this.onOpen});
-  final List<Conversation> conversations;
-  final void Function(Conversation) onOpen;
+  const _DayStack({
+    required this.conversations,
+    required this.onOpen,
+    required this.onDelete,
+    required this.fmtTime,
+  });
+  final List<domain.Conversation> conversations;
+  final void Function(domain.Conversation) onOpen;
+  final void Function(domain.Conversation) onDelete;
+  final String Function(DateTime) fmtTime;
 
   @override
   Widget build(BuildContext context) {
@@ -369,9 +309,9 @@ class _DayStack extends StatelessWidget {
     final stackH = n == 0 ? h * 0.2 : cardH + (n - 1) * gap;
 
     if (n == 0) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        child: const Center(
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(
           child: Text('該日沒有對話', style: TextStyle(color: Color(0xFFEAF0F6))),
         ),
       );
@@ -395,6 +335,8 @@ class _DayStack extends StatelessWidget {
                   conv: conversations[i],
                   elevation: 6.0 + i * 1.0,
                   onTap: () => onOpen(conversations[i]),
+                  onDelete: () => onDelete(conversations[i]),
+                  fmtTime: fmtTime,
                 ),
               ),
           ],
@@ -405,63 +347,101 @@ class _DayStack extends StatelessWidget {
 }
 
 class _StackCard extends StatelessWidget {
-  const _StackCard({required this.conv, required this.elevation, required this.onTap});
-  final Conversation conv;
+  const _StackCard({
+    required this.conv,
+    required this.elevation,
+    required this.onTap,
+    required this.onDelete,
+    required this.fmtTime,
+  });
+  final domain.Conversation conv;
   final double elevation;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
+  final String Function(DateTime) fmtTime;
 
   @override
   Widget build(BuildContext context) {
     const white = Color(0xFFEAF0F6);
-    return Material(
-      color: const Color(0xFF143343).withOpacity(0.16),
-      elevation: elevation,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
+    return Dismissible(
+      key: ValueKey('conv_${conv.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        color: const Color(0xFFB00020),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
+      ),
+      onDismissed: (_) => onDelete(),
+      child: Material(
+        color: const Color(0xFF143343).withOpacity(0.16),
+        elevation: elevation,
         borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      conv.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: white, fontSize: 16, fontWeight: FontWeight.w700),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        conv.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: white, fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    DateFormat('HH:mm').format(conv.updatedAt),
-                    style: TextStyle(color: white.withOpacity(.7), fontSize: 12),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: Text(
-                  conv.lastMessage,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: white.withOpacity(.9), fontSize: 13, height: 1.3),
+                    const SizedBox(width: 8),
+                    Text(
+                      fmtTime(conv.updatedAt),
+                      style: TextStyle(color: white.withOpacity(.7), fontSize: 12),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.mic_rounded, size: 18, color: Color(0xFFA7C7E7)),
-                  const SizedBox(width: 6),
-                  Text('${conv.messageCount}', style: TextStyle(color: white.withOpacity(.9), fontSize: 12)),
-                ],
-              )
-            ],
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Text(
+                    conv.lastMessage,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: white.withOpacity(.9), fontSize: 13, height: 1.3),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.mic_rounded, size: 18, color: Color(0xFFA7C7E7)),
+                    const SizedBox(width: 6),
+                    Text('${conv.messageCount}', style: TextStyle(color: white.withOpacity(.9), fontSize: 12)),
+                  ],
+                )
+              ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Color(0xFFA7C7E7)),
+          const SizedBox(height: 12),
+          const Text('還沒有任何對話', style: TextStyle(color: Color(0xFFEAF0F6), fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          const Text('點擊右上角「新對話」開始', style: TextStyle(color: Color(0x99EAF0F6))),
+        ],
       ),
     );
   }
