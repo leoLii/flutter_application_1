@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import '../../presentation/controllers/auth_controller.dart';
 import 'guest_start.dart';
 
 class AuthPage extends StatefulWidget {
@@ -13,27 +14,44 @@ class _AuthPageState extends State<AuthPage> {
   final _emailCtl = TextEditingController();
   final _codeCtl = TextEditingController();
   bool _obscure = true;
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _emailCtl.dispose();
+    _codeCtl.dispose();
+    super.dispose();
+  }
 
   void _onLogin() async {
+    if (_submitting) return;
     final email = _emailCtl.text.trim();
     final password = _codeCtl.text;
 
-    if (email == 'test' && password == 'test') {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setBool('logged_in', true);
-      await sp.setString('email', email);
-
+    setState(() => _submitting = true);
+    try {
+      // 使用全局 AuthController
+      final auth = context.read<AuthController>();
+      await auth.login(email, password);
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const GuestStartPage()),
-        (route) => false,
+      if (auth.loggedIn) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const GuestStartPage()),
+          (route) => false,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('登入失敗，請檢查帳號或密碼')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('登入發生錯誤：$e')),
       );
-      return;
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('登入失敗，請檢查帳號或密碼')),
-    );
   }
 
   @override
@@ -147,8 +165,13 @@ class _AuthPageState extends State<AuthPage> {
                     foregroundColor: const Color(0xFF143343),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: _onLogin,
-                  child: Text('登入', style: TextStyle(fontSize: fsBody, fontWeight: FontWeight.w700)),
+                  onPressed: _submitting ? null : _onLogin,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 22, height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text('登入', style: TextStyle(fontSize: fsBody, fontWeight: FontWeight.w700)),
                 ),
               ),
               SizedBox(height: h * 0.02),

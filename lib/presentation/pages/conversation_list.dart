@@ -124,7 +124,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
       for (int i = 0; i < perDay; i++) {
         final t = day.add(Duration(hours: rng.nextInt(23), minutes: rng.nextInt(59)));
         list.add(Conversation(
-          id: 'demo_${d}_${i}',
+          id: 'demo_${d}_$i',
           title: '對話 ${d + 1}-${i + 1}',
           lastMessage: i == 0 && d == 0 ? '歡迎回來，點擊開始新的 1 分鐘對話' : '這是歷史訊息摘要…',
           updatedAt: t,

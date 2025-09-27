@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import '../services/packs_manager.dart';
+import 'package:provider/provider.dart';
+import '../controllers/packs_controller.dart';
+import '../controllers/auth_controller.dart';
 
 class SessionPage extends StatefulWidget {
   const SessionPage({super.key});
@@ -88,8 +90,8 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
           setState(() => _listening = false);
         }
         _started = false;
-        // 消耗 1 分鐘（從 30 分鐘套餐中以分鐘粒度扣），失敗則不動
-        await PacksManager.I.tryConsumeMinutes(1);
+        // 消耗 1 分鐘（由 PacksController 按 30 分鐘粒度結算）
+        await context.read<PacksController>().tryConsumeMinutes(1);
         if (mounted) {
           setState(() {}); // 觸發 UI 刷新剩餘分鐘/套餐
           ScaffoldMessenger.of(context).showSnackBar(
@@ -374,6 +376,9 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                 final w = constraints.maxWidth;
                 final h = constraints.maxHeight;
 
+                final auth  = context.watch<AuthController>();
+                final packs = context.watch<PacksController>();
+
                 // 相對尺寸（文字、間距、圓角、圖示等）
                 final s = math.min(w, h);
                 final fsBody     = h * (15.0 / 932.25);
@@ -425,14 +430,15 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                           const Spacer(),
                           TextButton(
                             onPressed: () async {
-                              if (PacksManager.I.packs30 <= 0) {
+                              final packsCtl = context.read<PacksController>();
+                              if (packsCtl.packs30 <= 0) {
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('沒有可扣的套餐')),
                                 );
                                 return;
                               }
-                              await PacksManager.I.addPacks(-1);
+                              await packsCtl.addPacks(-1);
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('DEBUG：已扣除 1 組（30 分鐘）')),
@@ -586,7 +592,7 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
                                       ),
                                       SizedBox(height: h * 0.004),
                                       Text(
-                                        '帳戶剩餘 ${PacksManager.I.totalMinutes} 分鐘',
+                                        '帳戶剩餘 ${context.watch<PacksController>().totalMinutes} 分鐘',
                                         style: TextStyle(color: Colors.white70, fontSize: fsTimer * 0.9),
                                       ),
                                     ],

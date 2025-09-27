@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
-import 'pages/guest_start.dart';
+import 'app/app_provider.dart';
+import 'app/di.dart';
+import 'presentation/pages/guest_start.dart';
 
-void main() => runApp(const PsycheApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await DI.init();
+  runApp(const MyApp());
+}
 
-class PsycheApp extends StatelessWidget {
-  const PsycheApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: '心理諮商 App',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true),
-      home: const GuestStartPage(),
+    return AppProviders(
+      child: MaterialApp(
+        home: const GuestStartPage(),
+      ),
     );
   }
 }
