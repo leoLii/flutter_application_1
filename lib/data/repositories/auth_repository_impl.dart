@@ -1,22 +1,24 @@
 import '../../domain/repositories/auth_repository.dart';
-import '../datasources/local_auth_ds.dart';
+import '../datasources/local_prefs.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
-  final LocalAuthDataSource local;
-  AuthRepositoryImpl(this.local);
+  final LocalPrefs _prefs = LocalPrefs.instance;
 
   @override
-  Future<bool> isLoggedIn() => local.isLoggedIn();
+  Future<bool> isLoggedIn() => _prefs.getLoggedIn();
 
   @override
   Future<void> login({required String email, required String password}) async {
     // TODO: 接后端校验；现在先本地通过
-    await local.setLoggedIn(true, email: email);
+    await _prefs.setLoggedIn(true);
+    await _prefs.setEmail(email);
   }
 
   @override
-  Future<void> logout() => local.setLoggedIn(false);
+  Future<void> logout() async {
+    await _prefs.clearAuth();
+  }
 
   @override
-  Future<String?> currentEmail() => local.currentEmail();
+  Future<String?> currentEmail() => _prefs.getEmail();
 }

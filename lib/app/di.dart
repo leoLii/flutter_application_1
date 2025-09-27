@@ -1,9 +1,6 @@
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
-import '../data/datasources/local_auth_ds.dart';
-import '../data/datasources/local_packs_ds.dart';
-import '../data/datasources/local_db.dart';
 import '../data/repositories/auth_repository_impl.dart';
 import '../data/repositories/packs_repository_impl.dart';
 import '../data/repositories/conversation_repository_impl.dart';
@@ -15,13 +12,9 @@ import '../presentation/controllers/packs_controller.dart';
 import '../presentation/controllers/conversation_controller.dart';
 
 class DI {
-  // data sources
-  static final _authLocal  = LocalAuthDataSource();
-  static final _packsLocal = LocalPacksDataSource();
-
   // repos
-  static final AuthRepository  authRepo  = AuthRepositoryImpl(_authLocal);
-  static final PacksRepository packsRepo = PacksRepositoryImpl(_packsLocal);
+  static final AuthRepository  authRepo  = AuthRepositoryImpl();
+  static final PacksRepository packsRepo = PacksRepositoryImpl();
 
   // controllers
   static final AuthController  auth  = AuthController(authRepo);
