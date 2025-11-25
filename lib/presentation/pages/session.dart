@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:provider/provider.dart';
@@ -309,63 +310,19 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
     return Scaffold(
       backgroundColor: const Color(0xFF0C1C24),
       body: Stack(
-        children: [
-          // === 背景：放在 SafeArea 之外，真正全屏鋪滿 ===
+          children: [
+          // 1. 底色層保持不變
           const Positioned.fill(
             child: ColoredBox(color: Color(0xFF1E88E5)),
           ),
+          // 2. 動畫層改用 CustomPaint
           Positioned.fill(
-            child: AnimatedBuilder(
-              animation: Listenable.merge([_ctrl, _flow]),
-              builder: (_, __) {
-                final t = _ctrl.value;                   // 0→1：橙色覆蓋比例逐漸增多
-                final phase = _flow.value * 2 * math.pi; // 流動相位
-
-                const cloudOrange = Color(0xFFFF8A00);
-                final blobs = <Widget>[];
-                for (var i = 0; i < _seeds.length; i++) {
-                  final seed = _seeds[i];
-                  final baseX = 0.5 + 0.45 * math.sin(phase * (0.6 + 0.1 * i) + seed * 8.0);
-                  final baseY = 0.5 + 0.35 * math.cos(phase * (0.5 + 0.07 * i) + seed * 6.0);
-
-                  final minR = 0.14; // 相對於畫面短邊
-                  final maxR = 0.34;
-                  final radius = (minR + (maxR - minR) * (0.35 + 0.65 * t));
-                  final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
-
-                  // 使用 MediaQuery 尺寸，確保背景不受 SafeArea 影響
-                  final size = MediaQuery.of(context).size;
-                  final w = size.width;
-                  final h = size.height;
-                  final cx = w * baseX;
-                  final cy = h * baseY;
-                  final r  = math.min(w, h) * radius;
-
-                  blobs.add(
-                    Positioned(
-                      left: cx - r,
-                      top: cy - r,
-                      width: r * 2,
-                      height: r * 2,
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: RadialGradient(
-                              colors: [
-                                cloudOrange.withOpacity(alpha),
-                                cloudOrange.withOpacity(0.0),
-                              ],
-                              stops: const [0.0, 1.0],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }
-                return Stack(children: blobs);
-              },
+            child: CustomPaint(
+              painter: CloudBackgroundPainter(
+                flow: _flow,
+                ctrl: _ctrl,
+                seeds: _seeds,
+              ),
             ),
           ),
 
@@ -675,5 +632,66 @@ class _SessionPageState extends State<SessionPage> with TickerProviderStateMixin
         ],
       ),
     );
+  }
+}
+
+class CloudBackgroundPainter extends CustomPainter {
+  final Animation<double> flow; // 流動動畫
+  final Animation<double> ctrl; // 顏色/半徑進度
+  final List<double> seeds;     // 隨機因子
+
+  CloudBackgroundPainter({
+    required this.flow,
+    required this.ctrl,
+    required this.seeds,
+  }) : super(repaint: Listenable.merge([flow, ctrl])); // 綁定動畫，自動重繪
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final t = ctrl.value;
+    final phase = flow.value * 2 * math.pi;
+    const cloudOrange = Color(0xFFFF8A00);
+
+    // 遍歷種子，繪製每一個光暈
+    for (var i = 0; i < seeds.length; i++) {
+      final seed = seeds[i];
+      // 邏輯與原代碼完全一致
+      final baseX = 0.5 + 0.45 * math.sin(phase * (0.6 + 0.1 * i) + seed * 8.0);
+      final baseY = 0.5 + 0.35 * math.cos(phase * (0.5 + 0.07 * i) + seed * 6.0);
+
+      final minR = 0.14;
+      final maxR = 0.34;
+      final radiusFactor = (minR + (maxR - minR) * (0.35 + 0.65 * t));
+      // 使用短邊作為基準計算半徑
+      final r = math.min(w, h) * radiusFactor; 
+      final alpha = (0.30 + 0.55 * t).clamp(0.0, 0.85);
+
+      final cx = w * baseX;
+      final cy = h * baseY;
+
+      // 創建徑向漸變畫筆
+      final paint = Paint()
+        ..shader = ui.Gradient.radial(
+          Offset(cx, cy),
+          r,
+          [
+            cloudOrange.withOpacity(alpha),
+            cloudOrange.withOpacity(0.0),
+          ],
+          [0.0, 1.0], // 從中心(0.0)到邊緣(1.0)
+        );
+
+      // 直接繪製圓形
+      canvas.drawCircle(Offset(cx, cy), r, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CloudBackgroundPainter oldDelegate) {
+    return oldDelegate.flow != flow ||
+           oldDelegate.ctrl != ctrl ||
+           oldDelegate.seeds != seeds;
   }
 }
